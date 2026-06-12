@@ -1,9 +1,9 @@
-# CLAUDE.md — LoL SoloQ Meta-Detection Pipeline
+# CLAUDE.md — GetPrio (LoL SoloQ Meta-Detection Pipeline)
 
 ## What this project is
-An analytics pipeline that detects emerging champion picks in high-elo soloq
-*before* they appear in professional play — a proactive drafting edge for a
-pro LoL team. Core thesis: soloq win rates alone don't predict pro viability;
+**GetPrio**: an analytics pipeline that detects emerging champion picks in
+high-elo soloq *before* they appear in professional play — a proactive
+drafting edge for a pro LoL team. Core thesis: soloq win rates alone don't predict pro viability;
 the signal is **pick-rate velocity + shrunken win-rate edge + pro players
 labbing the pick on their soloq accounts**.
 
