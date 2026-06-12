@@ -168,3 +168,31 @@ CREATE OR REPLACE VIEW latest_emergence AS
 SELECT e.*
 FROM emergence_scores e
 WHERE e.run_at = (SELECT max(run_at) FROM emergence_scores);
+
+-- ------------------------------------------------------------
+-- Backtest ground truth: champion picks in professional games.
+-- Loaded from Leaguepedia scoreboards (fetch_pro_picks.py); the grain
+-- is one pick so the source can change without schema churn. Champion
+-- is stored as champions.champ_key() so it joins Riot payload names.
+-- Patch is warehouse format ('16.11'), mapped from esports numbering.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pro_picks (
+    game_id         TEXT NOT NULL,           -- Leaguepedia GameId
+    league          TEXT NOT NULL,           -- LCK / LEC ...
+    game_date       DATE NOT NULL,
+    patch           TEXT,                    -- NULL when the wiki lacks it
+    champ_key       TEXT NOT NULL,
+    team_position   TEXT,                    -- TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY
+    player          TEXT,
+    team            TEXT,
+    PRIMARY KEY (game_id, champ_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pro_picks_champ ON pro_picks (champ_key, patch);
+
+-- First professional appearance per champion/position/patch/league
+CREATE OR REPLACE VIEW pro_first_picks AS
+SELECT champ_key, team_position, patch, league,
+       min(game_date) AS first_date, count(*) AS games
+FROM pro_picks
+GROUP BY 1, 2, 3, 4;

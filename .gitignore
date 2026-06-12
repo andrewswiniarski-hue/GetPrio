@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .database_url
 logs/
+.leaguepedia_creds
+data/

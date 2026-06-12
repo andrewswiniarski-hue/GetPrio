@@ -26,6 +26,7 @@ python fetch_matches.py --limit 200    # frequent; bounded per run, resumes via 
 python parse_matches.py                # after each fetch batch
 python fetch_pro_rosters.py            # regenerate pro_accounts_seed.csv from Leaguepedia (slow: rate-limit backoffs)
 python load_pro_accounts.py pro_accounts_seed.csv   # resolve + load; rerun after regen or roster changes
+python fetch_pro_picks.py              # refresh pro-play ground truth (pro_picks) from Leaguepedia scoreboards
 python compute_stats.py [--patch 25.11]
 ```
 
@@ -69,6 +70,12 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
   Loaded: 66 kr accounts / 49 pros; 696 pro games visible in the warehouse.
   Hand-edits to the CSV are clobbered by regeneration — re-add manual rows or
   load them from a second CSV. euw1/na1 rows skip until those platforms return
+- ✅ Backtest ground truth loaded: `fetch_pro_picks.py` → `pro_picks` (5,870
+  picks / 587 LCK+LEC stage games of 2026, all champion keys join the
+  warehouse via `champions.champ_key`). Esports patch numbering maps to
+  gameVersion: official "26.11" == warehouse "16.11" (majors ≥25 minus 10).
+  Leaguepedia auth: bot creds in gitignored `.leaguepedia_creds` bypass the
+  harsh anonymous IP limits (anonymous penalties can last hours)
 - ⚠️ `config.PLATFORMS` temporarily kr-only; restore euw1/na1 once a production
   key replaces the dev key (dev key expires every 24h)
 - ❌ No tests beyond the smoke test; no scheduler; no dashboard
@@ -85,8 +92,9 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
 1. ~~Pro-account seed CSV~~ done via `fetch_pro_rosters.py`; optional polish:
    hand-fill the ~33 players Leaguepedia has no usable soloq IDs for
 2. Production API key; then re-enable euw1/na1 in `config.PLATFORMS`
-3. Backtest harness over accumulated patches (16.11+ are in the warehouse);
-   tune score weights for lead time
+3. Backtest harness: ground truth done (`pro_picks` / `pro_first_picks`);
+   remaining: replay daily stats as-of past dates, lead-time metrics, weight
+   tuning (needs a few more weeks of accumulated patches to be meaningful)
 4. Matchup/synergy matrices (table `matchup_stats` already exists, unused)
 5. Streamlit dashboard over `latest_emergence`
 6. Scheduling (cron is fine; Airflow only if this grows)

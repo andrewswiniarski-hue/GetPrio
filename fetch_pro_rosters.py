@@ -18,6 +18,7 @@ import argparse
 import csv
 import datetime as dt
 import logging
+import os
 import re
 import time
 
@@ -71,6 +72,45 @@ DEFAULT_TAGS = {
 LEGACY_NAME_RE = re.compile(r"[^\W_][\w ]{1,14}[^\W_]")
 
 _last_call = 0.0
+
+# Optional bot-password login (Special:BotPasswords). Logged-in sessions get
+# far friendlier API limits than anonymous IPs. One line in the gitignored
+# file:  YourUsername@botname:generated-password
+CREDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          ".leaguepedia_creds")
+
+
+def make_session() -> requests.Session:
+    """Session with UA set, logged in if .leaguepedia_creds exists."""
+    session = requests.Session()
+    session.headers["User-Agent"] = USER_AGENT
+    if not os.path.exists(CREDS_FILE):
+        return session
+    with open(CREDS_FILE, encoding="utf-8") as f:
+        raw = f.read().strip()
+    if ":" not in raw:
+        log.warning(".leaguepedia_creds malformed (want user@bot:password); "
+                    "continuing anonymously")
+        return session
+    name, password = raw.split(":", 1)
+    try:
+        tok = session.get(API_URL, params={
+            "action": "query", "meta": "tokens", "type": "login",
+            "format": "json"}, timeout=30).json()
+        resp = session.post(API_URL, data={
+            "action": "login", "lgname": name, "lgpassword": password,
+            "lgtoken": tok["query"]["tokens"]["logintoken"],
+            "format": "json"}, timeout=30).json()
+        result = resp.get("login", {}).get("result")
+        if result == "Success":
+            log.info("Leaguepedia: logged in as %s", name)
+        else:
+            log.warning("Leaguepedia login failed (%s); continuing "
+                        "anonymously", result)
+    except (requests.RequestException, ValueError, KeyError) as e:
+        log.warning("Leaguepedia login error (%s); continuing anonymously",
+                    type(e).__name__)
+    return session
 
 
 def cargo_query(session: requests.Session, **params) -> list[dict]:
@@ -241,8 +281,7 @@ def main() -> None:
     ap.add_argument("--year", type=int, default=dt.date.today().year)
     args = ap.parse_args()
 
-    session = requests.Session()
-    session.headers["User-Agent"] = USER_AGENT
+    session = make_session()
 
     rows: list[dict] = []
     seen_accounts: dict[tuple[str, str], str] = {}
