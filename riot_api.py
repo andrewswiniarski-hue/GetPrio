@@ -7,6 +7,7 @@ Two routing schemes matter:
 import logging
 import time
 from collections import deque
+from urllib.parse import quote
 
 import requests
 
@@ -53,7 +54,14 @@ class RiotClient:
     def _get(self, url: str, params: dict | None = None, max_retries: int = 5):
         for attempt in range(max_retries):
             self.limiter.wait()
-            resp = self.session.get(url, params=params, timeout=15)
+            try:
+                resp = self.session.get(url, params=params, timeout=15)
+            except requests.RequestException as e:
+                wait = 2 ** attempt
+                log.warning("Network error %s; retrying in %ss (%s)",
+                            type(e).__name__, wait, url)
+                time.sleep(wait)
+                continue
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code == 404:
@@ -82,6 +90,14 @@ class RiotClient:
     def summoner_by_id(self, platform: str, summoner_id: str) -> dict | None:
         url = (f"https://{platform}.api.riotgames.com/lol/summoner/v4/"
                f"summoners/{summoner_id}")
+        return self._get(url)
+
+    # ---------------- Account-V1 (regional routing) ----------------
+    def account_by_riot_id(self, routing: str, game_name: str,
+                           tag_line: str) -> dict | None:
+        url = (f"https://{routing}.api.riotgames.com/riot/account/v1/"
+               f"accounts/by-riot-id/"
+               f"{quote(game_name, safe='')}/{quote(tag_line, safe='')}")
         return self._get(url)
 
     # ---------------- Match-V5 (regional routing) ----------------

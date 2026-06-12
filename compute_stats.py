@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 MIN_GAMES = 20          # ignore ultra-sparse champ/role cells entirely
 PRIOR_STRENGTH = 400    # pseudo-games for shrinkage; tune via backtest
+MIN_DURATION_S = 300    # exclude remakes/early surrenders from all stats
 
 
 def wilson_lcb(wins: int, games: int, z: float = 1.96) -> float:
@@ -38,7 +39,16 @@ def wilson_lcb(wins: int, games: int, z: float = 1.96) -> float:
 
 
 def latest_patch(cur) -> str:
-    cur.execute("SELECT patch FROM matches ORDER BY game_creation DESC LIMIT 1")
+    # Aborted games can carry an empty gameVersion (and duration 0);
+    # never let them drive patch selection.
+    cur.execute(
+        """
+        SELECT patch FROM matches
+        WHERE patch <> '' AND game_duration_s >= %s
+        ORDER BY game_creation DESC LIMIT 1
+        """,
+        (MIN_DURATION_S,),
+    )
     row = cur.fetchone()
     if not row:
         raise SystemExit("No parsed matches in warehouse")
@@ -54,7 +64,7 @@ def rebuild_daily_stats(cur, patch: str) -> None:
             SELECT date(m.game_creation) AS day, m.platform,
                    count(DISTINCT m.match_id) AS total_games
             FROM matches m
-            WHERE m.patch = %s
+            WHERE m.patch = %s AND m.game_duration_s >= %s
             GROUP BY 1, 2
         )
         INSERT INTO champ_daily_stats
@@ -69,10 +79,10 @@ def rebuild_daily_stats(cur, patch: str) -> None:
         JOIN matches m USING (match_id)
         JOIN day_totals dt
           ON dt.day = date(m.game_creation) AND dt.platform = m.platform
-        WHERE m.patch = %s
+        WHERE m.patch = %s AND m.game_duration_s >= %s
         GROUP BY 1, 2, 3, 4, 6, dt.total_games
         """,
-        (patch, patch),
+        (patch, MIN_DURATION_S, patch, MIN_DURATION_S),
     )
 
 
@@ -127,10 +137,10 @@ def main(patch: str | None) -> None:
             FROM participants p
             JOIN matches m USING (match_id)
             JOIN pro_accounts pa ON pa.puuid = p.puuid AND pa.active
-            WHERE m.patch = %s
+            WHERE m.patch = %s AND m.game_duration_s >= %s
             GROUP BY 1, 2
             """,
-            (patch,),
+            (patch, MIN_DURATION_S),
         )
         pro_games = {(cid, pos): n for cid, pos, n in cur.fetchall()}
 

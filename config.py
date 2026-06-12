@@ -13,8 +13,9 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost:5432/lolme
 # Start with the three highest-signal regions; add more later.
 PLATFORMS = {
     "kr":   "asia",
-    "euw1": "europe",
-    "na1":  "americas",
+    # Temporarily limited to kr for first real-API run. Restore for full ingest:
+    # "euw1": "europe",
+    # "na1":  "americas",
 }
 
 # League-V4 apex tiers to ingest

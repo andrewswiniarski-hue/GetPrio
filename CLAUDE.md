@@ -41,16 +41,24 @@ python compute_stats.py [--patch 25.11]
   it to patch-level totals.
 - **All API calls go through `riot_api.RiotClient`** (token-bucket limiter +
   429 Retry-After + 5xx backoff). Never call requests directly.
-- **Patch = first two components of gameVersion** ("25.11.700.100" → "25.11").
-- Secrets only via env vars. Never commit keys.
+- **Patch = first two components of gameVersion** ("16.11.700.100" → "16.11").
+  Aborted games can have an *empty* gameVersion and game_duration_s = 0 with no
+  participants; the remake filter handles them.
+- Secrets only via env vars. Never commit keys. For long-running loops the dev
+  key can live in the gitignored `.riot_key` file (read into the env at launch).
 
 ## Current state
-- ✅ Schema validated against live Postgres 16
-- ✅ End-to-end smoke-tested with synthetic data (300 matches → parse → stats;
-  lane opponents resolved, pro-account join verified)
-- ❌ Never run against the real Riot API — expect payload edge cases
-- ❌ No remake filter: games with gameDuration < ~300s (remakes/early surrenders)
-  currently pollute stats. Fix in parse or filter in aggregation. **High priority.**
+- ✅ Running against the real Riot API (KR): 10k+ matches / 100k participants
+  ingested; real payloads parse clean (edge cases are all sub-300s games)
+- ✅ Remake filter: `compute_stats.MIN_DURATION_S = 300` excludes remakes and
+  aborted games from `champ_daily_stats`, pro-games counts, and patch selection
+- ✅ Win rates validated vs Lolalytics KR Master+ patch 16.11: 7/9 champs within
+  sampling error. Caveat: player sample is Challenger-heavy (fetch order), so a
+  ~1pt systematic offset vs Master-dominated public data is expected
+- ✅ `load_pro_accounts.py` resolves blank puuids from riot_id via Account-V1;
+  join verified end-to-end (seeded account's games light up `pro_soloq_games`)
+- ⚠️ `config.PLATFORMS` temporarily kr-only; restore euw1/na1 once a production
+  key replaces the dev key (dev key expires every 24h)
 - ❌ No tests beyond the smoke test; no scheduler; no dashboard
 
 ## Known tuning knobs (set crudely, tune via backtest)
@@ -62,13 +70,14 @@ python compute_stats.py [--patch 25.11]
   Elixir match data, free CSV downloads).
 
 ## Roadmap (priority order)
-1. Run against real API (KR, small limits), fix payload edge cases, add remake filter
-2. Validate win rates vs. Lolalytics/U.GG Master+ for ~10 champs (±1–2pts = pass)
-3. Pro-account seed CSV (start ~50 LCK/LEC accounts) + verify pro_soloq_games signal
-4. Backtest harness over previous patches; tune score weights for lead time
-5. Matchup/synergy matrices (table `matchup_stats` already exists, unused)
-6. Streamlit dashboard over `latest_emergence`
-7. Scheduling (cron is fine; Airflow only if this grows)
+1. Pro-account seed CSV (start ~50 LCK/LEC accounts; tooling done — fill in
+   `pro_accounts_seed.example.csv` pattern, blank puuids resolve automatically)
+2. Production API key; then re-enable euw1/na1 in `config.PLATFORMS`
+3. Backtest harness over accumulated patches (16.11+ are in the warehouse);
+   tune score weights for lead time
+4. Matchup/synergy matrices (table `matchup_stats` already exists, unused)
+5. Streamlit dashboard over `latest_emergence`
+6. Scheduling (cron is fine; Airflow only if this grows)
 
 ## Working style for Claude Code sessions
 - One verifiable objective per session; run the pipeline to prove changes work
