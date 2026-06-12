@@ -24,7 +24,8 @@ export DATABASE_URL="postgresql://localhost:5432/lolmeta"
 python fetch_ladder.py                 # daily; applies schema.sql on first run
 python fetch_matches.py --limit 200    # frequent; bounded per run, resumes via players.last_match_pull
 python parse_matches.py                # after each fetch batch
-python load_pro_accounts.py seed.csv   # when pro account list changes
+python fetch_pro_rosters.py            # regenerate pro_accounts_seed.csv from Leaguepedia (slow: rate-limit backoffs)
+python load_pro_accounts.py pro_accounts_seed.csv   # resolve + load; rerun after regen or roster changes
 python compute_stats.py [--patch 25.11]
 ```
 
@@ -57,6 +58,11 @@ python compute_stats.py [--patch 25.11]
   ~1pt systematic offset vs Master-dominated public data is expected
 - ✅ `load_pro_accounts.py` resolves blank puuids from riot_id via Account-V1;
   join verified end-to-end (seeded account's games light up `pro_soloq_games`)
+- ✅ `fetch_pro_rosters.py` auto-builds the seed CSV from Leaguepedia's Cargo
+  API (LCK+LEC rosters, soloq IDs incl. default-tag guesses for legacy names).
+  Loaded: 66 kr accounts / 49 pros; 696 pro games visible in the warehouse.
+  Hand-edits to the CSV are clobbered by regeneration — re-add manual rows or
+  load them from a second CSV. euw1/na1 rows skip until those platforms return
 - ⚠️ `config.PLATFORMS` temporarily kr-only; restore euw1/na1 once a production
   key replaces the dev key (dev key expires every 24h)
 - ❌ No tests beyond the smoke test; no scheduler; no dashboard
@@ -70,8 +76,8 @@ python compute_stats.py [--patch 25.11]
   Elixir match data, free CSV downloads).
 
 ## Roadmap (priority order)
-1. Pro-account seed CSV (start ~50 LCK/LEC accounts; tooling done — fill in
-   `pro_accounts_seed.example.csv` pattern, blank puuids resolve automatically)
+1. ~~Pro-account seed CSV~~ done via `fetch_pro_rosters.py`; optional polish:
+   hand-fill the ~33 players Leaguepedia has no usable soloq IDs for
 2. Production API key; then re-enable euw1/na1 in `config.PLATFORMS`
 3. Backtest harness over accumulated patches (16.11+ are in the warehouse);
    tune score weights for lead time

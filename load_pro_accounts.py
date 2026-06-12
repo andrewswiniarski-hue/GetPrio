@@ -40,7 +40,8 @@ def main(path: str) -> None:
     conn = db.get_conn()
     client = None
     n = skipped = 0
-    with conn.cursor() as cur, open(path, newline="") as f:
+    with conn.cursor() as cur, open(path, newline="",
+                                    encoding="utf-8") as f:
         for row in csv.DictReader(f):
             row = {k: (v or "").strip() for k, v in row.items()}
             if not row.get("puuid"):
