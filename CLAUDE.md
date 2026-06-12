@@ -29,6 +29,12 @@ python load_pro_accounts.py pro_accounts_seed.csv   # resolve + load; rerun afte
 python compute_stats.py [--patch 25.11]
 ```
 
+Scheduled ingest: `daily_run.ps1` runs the 4-step chain daily via Task
+Scheduler ("LoLDraftTool Daily Ingest", 07:00, registered by
+`register_daily_task.ps1`). Secrets load from gitignored `.riot_key` and
+`.database_url`; an expired dev key fails the pre-flight loudly (one missed
+day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
+
 ## Critical conventions — do not break these
 - **Routing split**: League-V4/Summoner-V4 use *platform* routing (kr, euw1, na1);
   Match-V5 uses *regional* routing (asia, europe, americas). The mapping lives in

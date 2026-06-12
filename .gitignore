@@ -2,3 +2,5 @@
 backfill.log
 __pycache__/
 *.pyc
+.database_url
+logs/
