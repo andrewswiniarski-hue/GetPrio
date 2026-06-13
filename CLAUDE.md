@@ -76,6 +76,11 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
   gameVersion: official "26.11" == warehouse "16.11" (majors ≥25 minus 10).
   Leaguepedia auth: bot creds in gitignored `.leaguepedia_creds` bypass the
   harsh anonymous IP limits (anonymous penalties can last hours)
+- ✅ `backtest.py` runs as-of replay vs ground truth. First daily ingest ran
+  unattended (2026-06-13); warehouse holds one complete patch (16.11, 14 days)
+  plus live 16.12. Backtest v1 is recall+lead only and overstates the signal
+  (see roadmap #3); the daily scheduler is now accumulating the patches needed
+  to make tuning meaningful
 - ⚠️ `config.PLATFORMS` temporarily kr-only; restore euw1/na1 once a production
   key replaces the dev key (dev key expires every 24h)
 - ❌ No tests beyond the smoke test; no scheduler; no dashboard
@@ -92,9 +97,12 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
 1. ~~Pro-account seed CSV~~ done via `fetch_pro_rosters.py`; optional polish:
    hand-fill the ~33 players Leaguepedia has no usable soloq IDs for
 2. Production API key; then re-enable euw1/na1 in `config.PLATFORMS`
-3. Backtest harness: ground truth done (`pro_picks` / `pro_first_picks`);
-   remaining: replay daily stats as-of past dates, lead-time metrics, weight
-   tuning (needs a few more weeks of accumulated patches to be meaningful)
+3. Backtest harness: `backtest.py` replays as-of daily rankings vs `pro_picks`
+   (recall + lead time). v1 DONE but headline is inflated by perennial strong
+   picks flagged on WR alone before velocity kicks in. Remaining: novelty
+   baseline (was the pick established in the prior patch?), a precision side
+   (do flagged picks actually reach stage?), then weight tuning — all need a
+   few more accumulated patches to be statistically meaningful
 4. Matchup/synergy matrices (table `matchup_stats` already exists, unused)
 5. Streamlit dashboard over `latest_emergence`
 6. Scheduling (cron is fine; Airflow only if this grows)
