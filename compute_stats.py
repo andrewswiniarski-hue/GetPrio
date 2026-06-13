@@ -26,6 +26,25 @@ MIN_GAMES = 20          # ignore ultra-sparse champ/role cells entirely
 PRIOR_STRENGTH = 400    # pseudo-games for shrinkage; tune via backtest
 MIN_DURATION_S = 300    # exclude remakes/early surrenders from all stats
 
+# Composite-score weights. Crude starting values; tune via backtest.py.
+WR_EDGE_WEIGHT = 100    # per point of shrunken WR above the patch mean
+VELOCITY_WEIGHT = 5000  # per unit of daily pick-rate slope
+PRO_WEIGHT = 1.5        # per log1p(pro soloq game)
+
+
+def composite_score(shrunk_wr: float, prior_mean: float, velocity: float,
+                    pro_n: int, wr_w: float = WR_EDGE_WEIGHT,
+                    vel_w: float = VELOCITY_WEIGHT,
+                    pro_w: float = PRO_WEIGHT) -> float:
+    """Emergence score: above-average shrunken WR, scaled by how fast the
+    pick is growing and whether pros are labbing it. Weights are injectable
+    so the backtest can sweep them without forking the formula."""
+    return (
+        (shrunk_wr - prior_mean) * wr_w     # WR edge in points
+        + max(velocity, 0.0) * vel_w        # growth term
+        + math.log1p(pro_n) * pro_w         # pro-lab term
+    )
+
 
 def wilson_lcb(wins: int, games: int, z: float = 1.96) -> float:
     """Wilson score interval lower bound."""
@@ -161,14 +180,7 @@ def main(patch: str | None) -> None:
 
             pro_n = pro_games.get((champ_id, pos), 0)
 
-            # Composite score: above-average shrunken WR, scaled by how fast
-            # the pick is growing and whether pros are labbing it.
-            # Weights are a starting point — tune against backtests.
-            score = (
-                (shrunk - prior_mean) * 100          # WR edge in points
-                + max(velocity, 0) * 5000            # growth term
-                + math.log1p(pro_n) * 1.5            # pro-lab term
-            )
+            score = composite_score(shrunk, prior_mean, velocity, pro_n)
 
             cur.execute(
                 """
