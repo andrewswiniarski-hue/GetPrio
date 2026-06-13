@@ -98,11 +98,12 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
    hand-fill the ~33 players Leaguepedia has no usable soloq IDs for
 2. Production API key; then re-enable euw1/na1 in `config.PLATFORMS`
 3. Backtest harness: `backtest.py` replays as-of daily rankings vs `pro_picks`
-   (recall + lead time). v1 DONE but headline is inflated by perennial strong
-   picks flagged on WR alone before velocity kicks in. Remaining: novelty
-   baseline (was the pick established in the prior patch?), a precision side
-   (do flagged picks actually reach stage?), then weight tuning — all need a
-   few more accumulated patches to be statistically meaningful
+   (recall + lead time), with a novel-only view. Novelty baseline DONE
+   (`NOVELTY_PICKRATE`, prior-patch pick share) — live `novel` flag on the
+   emergence report works now; backtest novel-only metrics activate once a
+   patch has both a prior-patch soloq baseline and pro_picks. Remaining: a
+   precision side (do flagged picks actually reach stage?), then weight
+   tuning — both need a few more accumulated patches to be meaningful
 4. Matchup/synergy matrices (table `matchup_stats` already exists, unused)
 5. Streamlit dashboard over `latest_emergence`
 6. Scheduling (cron is fine; Airflow only if this grows)
