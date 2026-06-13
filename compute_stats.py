@@ -31,6 +31,44 @@ WR_EDGE_WEIGHT = 100    # per point of shrunken WR above the patch mean
 VELOCITY_WEIGHT = 5000  # per unit of daily pick-rate slope
 PRO_WEIGHT = 1.5        # per log1p(pro soloq game)
 
+# Novelty: a pick is "novel" (genuinely emerging, vs. an already-known meta
+# pick) if its share of all picks in the *prior* patch was below this. The
+# coach-facing value is the novel list — it strips perennial picks a coach
+# already plans around. Crude starting value; tune via backtest.
+NOVELTY_PICKRATE = 0.005
+
+
+def patch_sort_key(patch: str) -> tuple:
+    """Numeric patch ordering so '16.9' < '16.11' (lexical sort breaks this)."""
+    return tuple(int(x) for x in patch.split(".") if x.isdigit())
+
+
+def prior_patch_of(cur, patch: str) -> str | None:
+    """The patch immediately before `patch` that has daily stats, or None."""
+    cur.execute("SELECT DISTINCT patch FROM champ_daily_stats WHERE patch <> ''")
+    earlier = [p for (p,) in cur.fetchall()
+               if patch_sort_key(p) < patch_sort_key(patch)]
+    return max(earlier, key=patch_sort_key) if earlier else None
+
+
+def baseline_pick_rates(cur, prior: str | None) -> dict:
+    """(champ_id, pos) -> share of all picks in the prior patch. {} if none."""
+    if not prior:
+        return {}
+    cur.execute(
+        """
+        WITH cell AS (
+            SELECT champion_id, team_position, sum(games) AS g
+            FROM champ_daily_stats WHERE patch = %s GROUP BY 1, 2
+        )
+        SELECT champion_id, team_position,
+               g::float / sum(g) OVER ()
+        FROM cell
+        """,
+        (prior,),
+    )
+    return {(cid, pos): pr for cid, pos, pr in cur.fetchall()}
+
 
 def composite_score(shrunk_wr: float, prior_mean: float, velocity: float,
                     pro_n: int, wr_w: float = WR_EDGE_WEIGHT,
@@ -163,6 +201,16 @@ def main(patch: str | None) -> None:
         )
         pro_games = {(cid, pos): n for cid, pos, n in cur.fetchall()}
 
+        # ---- novelty baseline: pick share in the prior patch ----
+        prior = prior_patch_of(cur, patch)
+        baseline = baseline_pick_rates(cur, prior)
+        if prior:
+            log.info("Novelty baseline: prior patch %s (%d known cells)",
+                     prior, len(baseline))
+        else:
+            log.info("Novelty baseline: none (no prior patch in warehouse); "
+                     "novel flag will be NULL")
+
         inserted = 0
         for (champ_id, champ_name, pos, games, wins,
              day_arr, rate_arr) in rows:
@@ -182,36 +230,48 @@ def main(patch: str | None) -> None:
 
             score = composite_score(shrunk, prior_mean, velocity, pro_n)
 
+            base_pr = baseline.get((champ_id, pos), 0.0)
+            # None when we have no prior patch to judge against.
+            novel = None if not prior else base_pr < NOVELTY_PICKRATE
+
             cur.execute(
                 """
                 INSERT INTO emergence_scores
                     (patch, champion_id, champion_name, team_position, games,
                      raw_wr, shrunk_wr, wr_lcb, pick_rate, pick_velocity,
-                     pro_soloq_games, score)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     pro_soloq_games, score, novel, baseline_pick_rate)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (patch, champ_id, champ_name, pos, games,
                  round(raw_wr, 4), round(shrunk, 4), round(lcb, 4),
                  round(pick_rate, 5), round(velocity, 5), pro_n,
-                 round(score, 4)),
+                 round(score, 4), novel, round(base_pr, 5)),
             )
             inserted += 1
 
         conn.commit()
 
-        cur.execute(
-            """
-            SELECT champion_name, team_position, games, shrunk_wr,
-                   pick_velocity, pro_soloq_games, score
-            FROM latest_emergence
-            ORDER BY score DESC
-            LIMIT 15
-            """
-        )
-        log.info("Top emerging picks, patch %s:", patch)
-        for name, pos, g, wr, vel, pro_n, sc in cur.fetchall():
-            log.info("  %-14s %-8s g=%-6d wr=%.3f vel=%+.5f pro=%-3d score=%.2f",
-                     name, pos, g, wr, vel, pro_n, sc)
+        def top_list(label, novel_only):
+            where = "WHERE novel" if novel_only else ""
+            cur.execute(
+                f"""
+                SELECT champion_name, team_position, games, shrunk_wr,
+                       pick_velocity, pro_soloq_games, score, novel
+                FROM latest_emergence {where}
+                ORDER BY score DESC LIMIT 15
+                """
+            )
+            log.info(label)
+            for name, pos, g, wr, vel, pro_n, sc, nov in cur.fetchall():
+                flag = "NEW" if nov else ("   " if nov is False else " ? ")
+                log.info("  [%s] %-14s %-8s g=%-6d wr=%.3f vel=%+.5f "
+                         "pro=%-3d score=%.2f",
+                         flag, name, pos, g, wr, vel, pro_n, sc)
+
+        top_list(f"Top emerging picks, patch {patch}:", novel_only=False)
+        if prior:
+            top_list(f"Top NOVEL emerging picks, patch {patch} (vs {prior}) "
+                     f"— the coach view:", novel_only=True)
 
     log.info("Wrote %d emergence rows", inserted)
     conn.close()

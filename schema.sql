@@ -160,10 +160,17 @@ CREATE TABLE IF NOT EXISTS emergence_scores (
     pick_velocity   NUMERIC(8,5),            -- slope of daily pick rate within patch
     pro_soloq_games INT,                     -- games on tracked pro accounts this patch
     score           NUMERIC(8,4),            -- composite emergence score
+    novel           BOOLEAN,                 -- not established in the prior patch (NULL = no baseline)
+    baseline_pick_rate NUMERIC(7,5),         -- this pick's share in the prior patch
     PRIMARY KEY (run_at, patch, champion_id, team_position)
 );
 
--- Convenience view: latest emergence run
+-- Backfill the novelty columns onto pre-existing emergence_scores tables.
+ALTER TABLE emergence_scores ADD COLUMN IF NOT EXISTS novel BOOLEAN;
+ALTER TABLE emergence_scores ADD COLUMN IF NOT EXISTS baseline_pick_rate NUMERIC(7,5);
+
+-- Convenience view: latest emergence run (recreated after ALTERs so e.*
+-- picks up the novelty columns on existing databases)
 CREATE OR REPLACE VIEW latest_emergence AS
 SELECT e.*
 FROM emergence_scores e

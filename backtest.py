@@ -32,8 +32,9 @@ from collections import defaultdict
 
 import db
 from champions import champ_key
-from compute_stats import (MIN_DURATION_S, MIN_GAMES, PRIOR_STRENGTH,
-                           composite_score, pick_velocity)
+from compute_stats import (MIN_DURATION_S, MIN_GAMES, NOVELTY_PICKRATE,
+                           PRIOR_STRENGTH, baseline_pick_rates,
+                           composite_score, pick_velocity, prior_patch_of)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
@@ -134,6 +135,15 @@ def run(patch, topns, leagues):
         series, names = load_daily(cur, patch)
         pro = load_pro_soloq(cur, patch)
         truth = load_ground_truth(cur, patch, leagues)
+        # Novelty baseline: pick share in the prior patch, keyed by champ_key
+        # so it joins the ground truth. Empty if no prior patch exists.
+        prior = prior_patch_of(cur, patch)
+        cur.execute("SELECT DISTINCT champion_id, champion_name "
+                    "FROM champ_daily_stats")
+        id_key_all = {cid: champ_key(n) for cid, n in cur.fetchall()}
+        baseline = {}
+        for (cid, pos), share in baseline_pick_rates(cur, prior).items():
+            baseline[(id_key_all.get(cid, str(cid)), pos)] = share
     conn.close()
 
     if not series:
@@ -149,6 +159,12 @@ def run(patch, topns, leagues):
              "last %s | leagues=%s", patch, d0, dN, len(days), len(truth),
              stage_dates[0], stage_dates[-1], ",".join(leagues) if leagues
              else "all")
+    if prior:
+        log.info("Novelty baseline: prior patch %s (%d cells)", prior,
+                 len(baseline))
+    else:
+        log.info("Novelty baseline: none (no prior patch in warehouse); "
+                 "novel-only metrics will be skipped")
 
     # champ_id -> champ_key, and (champ_key,pos) -> warehouse cells
     id_key = {cid: champ_key(name) for cid, name in names.items()}
@@ -181,21 +197,22 @@ def run(patch, topns, leagues):
                 status, lead = "caught_not_early", (F - flagged).days
             else:
                 status, lead = "missed", None
+            # novel = not an established pick in the prior patch (None=unknown)
+            novel = (None if not prior
+                     else baseline.get((k, pos), 0.0) < NOVELTY_PICKRATE)
             recs.append({"champ": k, "pos": pos, "first_stage": F,
                          "flagged": flagged, "lead_days": lead,
-                         "runway": runway, "status": status})
+                         "runway": runway, "status": status, "novel": novel})
         results[N] = recs
     return patch, d0, dN, results
 
 
-def report(patch, d0, dN, results):
-    topns = sorted(results)
-    print()
-    print(f"=== Backtest: patch {patch} (soloq {d0}..{dN}) ===")
+def _summary_table(results, subset):
+    """Print the detection summary for a subset filter applied to each N."""
     print(f"{'top-N':>6} {'evaluable':>9} {'caught_early':>12} "
           f"{'rate':>6} {'median_lead':>11} {'missed':>6} {'absent':>6}")
-    for N in topns:
-        recs = results[N]
+    for N in sorted(results):
+        recs = [r for r in results[N] if subset(r)]
         # fair denominator: stage picks present in our soloq data with a
         # pre-debut window to be caught in.
         evaluable = [r for r in recs if r["status"] != "absent_in_soloq"
@@ -209,6 +226,22 @@ def report(patch, d0, dN, results):
         print(f"{N:>6} {len(evaluable):>9} {len(early):>12} {rate:>6.0%} "
               f"{med:>11} {len(missed):>6} {len(absent):>6}")
 
+
+def report(patch, d0, dN, results):
+    topns = sorted(results)
+    has_novel = any(r["novel"] is not None for r in results[topns[0]])
+    print()
+    print(f"=== Backtest: patch {patch} (soloq {d0}..{dN}) ===")
+    print("ALL stage picks:")
+    _summary_table(results, lambda r: True)
+    if has_novel:
+        print("\nNOVEL picks only (not established in the prior patch) "
+              "— the real thesis test:")
+        _summary_table(results, lambda r: r["novel"])
+    else:
+        print("\n(novel-only view skipped: no prior-patch baseline for this "
+              "patch yet)")
+
     # per-pick detail at the middle N
     N = topns[len(topns) // 2]
     recs = sorted([r for r in results[N]
@@ -218,13 +251,15 @@ def report(patch, d0, dN, results):
                                  -(r["lead_days"] or 0)))
     print(f"\n--- per-pick detail @ top-{N} "
           f"(picks present in our soloq data) ---")
-    print(f"{'champ':<14}{'pos':<9}{'first_stage':<13}{'flagged':<13}"
-          f"{'lead':>6}  status")
+    print(f"{'champ':<14}{'pos':<9}{'nov':<4}{'first_stage':<13}"
+          f"{'flagged':<13}{'lead':>6}  status")
     for r in recs:
         lead = f"{r['lead_days']}d" if r["lead_days"] is not None else "-"
         flagged = str(r["flagged"]) if r["flagged"] else "never"
-        print(f"{r['champ']:<14}{r['pos']:<9}{str(r['first_stage']):<13}"
-              f"{flagged:<13}{lead:>6}  {r['status']}")
+        nov = "NEW" if r["novel"] else ("" if r["novel"] is False else "?")
+        print(f"{r['champ']:<14}{r['pos']:<9}{nov:<4}"
+              f"{str(r['first_stage']):<13}{flagged:<13}{lead:>6}  "
+              f"{r['status']}")
 
 
 def write_csv(patch, results):
@@ -233,14 +268,15 @@ def write_csv(patch, results):
     path = os.path.join("data", f"backtest_{patch}.csv")
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["top_n", "champ", "pos", "first_stage", "flagged",
+        w.writerow(["top_n", "champ", "pos", "novel", "first_stage", "flagged",
                     "lead_days", "runway", "status"])
         for N in topns:
             for r in results[N]:
-                w.writerow([N, r["champ"], r["pos"], r["first_stage"],
-                            r["flagged"] or "", r["lead_days"]
-                            if r["lead_days"] is not None else "",
-                            r["runway"], r["status"]])
+                w.writerow([N, r["champ"], r["pos"],
+                            "" if r["novel"] is None else r["novel"],
+                            r["first_stage"], r["flagged"] or "",
+                            r["lead_days"] if r["lead_days"] is not None
+                            else "", r["runway"], r["status"]])
     log.info("Wrote per-pick detail to %s", path)
 
 
