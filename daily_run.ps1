@@ -23,23 +23,43 @@ function Log([string]$Message) {
     Write-Host $line
 }
 
+# Heartbeat: every exit path records a glanceable status so a failed or
+# stale run is visible without reading the log. A FAILED marker file is
+# created on failure and cleared on success (easy to spot / script against).
+$statusFile = Join-Path $logDir "last_run.json"
+$failMarker = Join-Path $logDir "LAST_RUN_FAILED.txt"
+function Write-Status([string]$Result, [string]$Detail) {
+    $obj = [ordered]@{
+        finished_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        result      = $Result
+        detail      = $Detail
+        log         = (Split-Path $log -Leaf)
+    }
+    $obj | ConvertTo-Json | Set-Content -Path $statusFile -Encoding UTF8
+    if ($Result -eq "OK") {
+        if (Test-Path $failMarker) { Remove-Item $failMarker -Force }
+    } else {
+        Set-Content -Path $failMarker -Encoding UTF8 -Value `
+            "$($obj.finished_at)  $Result  $Detail  (see $($obj.log))"
+    }
+}
+function Fail([string]$Detail) {
+    Log "FATAL: $Detail"
+    Write-Status "FAILED" $Detail
+    exit 1
+}
+
 # ---- secrets ----
 $keyFile = Join-Path $PSScriptRoot ".riot_key"
 if (Test-Path $keyFile) {
     $env:RIOT_API_KEY = (Get-Content $keyFile -Raw).Trim()
 }
-if (-not $env:RIOT_API_KEY) {
-    Log "FATAL: no RIOT_API_KEY (.riot_key missing or empty)"
-    exit 1
-}
+if (-not $env:RIOT_API_KEY) { Fail "no RIOT_API_KEY (.riot_key missing or empty)" }
 $dbFile = Join-Path $PSScriptRoot ".database_url"
 if (Test-Path $dbFile) {
     $env:DATABASE_URL = (Get-Content $dbFile -Raw).Trim()
 }
-if (-not $env:DATABASE_URL) {
-    Log "FATAL: no DATABASE_URL (.database_url missing or empty)"
-    exit 1
-}
+if (-not $env:DATABASE_URL) { Fail "no DATABASE_URL (.database_url missing or empty)" }
 
 # ---- key pre-flight: fail loudly on an expired dev key ----
 try {
@@ -49,8 +69,7 @@ try {
     $code = 0
     if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
     if ($code -eq 401 -or $code -eq 403) {
-        Log "FATAL: Riot API key rejected ($code). Dev key expired - refresh .riot_key and re-run."
-        exit 1
+        Fail "Riot API key rejected ($code). Dev key expired - refresh .riot_key and re-run."
     }
     Log "WARNING: key pre-flight inconclusive ($($_.Exception.Message)); continuing, fetch has its own retry"
 }
@@ -63,8 +82,7 @@ function Invoke-Step([string]$Name, [string]$CommandLine) {
     Log "step start: $Name"
     cmd /c "$CommandLine >> `"$log`" 2>&1"
     if ($LASTEXITCODE -ne 0) {
-        Log "FATAL: step '$Name' failed with exit code $LASTEXITCODE - see log above"
-        exit 1
+        Fail "step '$Name' failed with exit code $LASTEXITCODE - see log above"
     }
     Log "step ok: $Name"
 }
@@ -74,4 +92,18 @@ Invoke-Step "fetch_matches" "python fetch_matches.py --limit $MatchLimit"
 Invoke-Step "parse_matches" "python parse_matches.py"
 Invoke-Step "compute_stats" "python compute_stats.py"
 
-Log "daily run complete"
+# ---- freshness guard: a green run that ingested nothing is still a problem ----
+$freshness = "freshness unknown"
+try {
+    $maxDay = (cmd /c "python -c ""import os,psycopg2; c=psycopg2.connect(os.environ['DATABASE_URL']); cur=c.cursor(); cur.execute('SELECT max(game_creation)::date FROM matches'); print(cur.fetchone()[0]); c.close()""" 2>$null).Trim()
+    $freshness = "newest game $maxDay"
+    $age = (New-TimeSpan -Start ([datetime]$maxDay) -End (Get-Date)).Days
+    if ($age -ge 2) {
+        Log "WARNING: newest match is $age days old ($maxDay) - ingest may be stalling"
+    }
+} catch {
+    Log "WARNING: freshness check failed ($($_.Exception.Message))"
+}
+
+Log "daily run complete ($freshness)"
+Write-Status "OK" "ingest + stats complete; $freshness"

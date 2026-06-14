@@ -91,6 +91,17 @@ the key evidence visible up front (novel/rising badges, win rate + sample,
 which pros are practicing it, stage status), and a one-click Briefing per pick
 (pick-rate trend, pro game log, stage detail).
 
+## Tests
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+Zero-dependency `unittest` suite over the load-bearing pure logic: champion
+name normalization, esports↔gameVersion patch mapping, the emergence-score
+math (composite score, Wilson LCB, pick velocity), and the SoloqueueIds
+wikitext parser.
+
 ## Design notes
 
 - **`matches_raw` is immutable.** New parsed fields are backfilled by

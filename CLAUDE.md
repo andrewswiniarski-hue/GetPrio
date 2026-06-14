@@ -31,13 +31,18 @@ python compute_stats.py [--patch 25.11]
 
 streamlit run dashboard.py             # coach dashboard over latest_emergence (reads .database_url if env unset)
 python backtest.py                     # replay as-of rankings vs pro_picks (recall + lead time, novel-only view)
+python -m unittest discover -s tests -t .   # pure-logic test suite (zero deps; champ_key, patch maps, scoring, roster parsing)
 ```
 
 Scheduled ingest: `daily_run.ps1` runs the 4-step chain daily via Task
 Scheduler ("LoLDraftTool Daily Ingest", 07:00, registered by
 `register_daily_task.ps1`). Secrets load from gitignored `.riot_key` and
 `.database_url`; an expired dev key fails the pre-flight loudly (one missed
-day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
+day, not a wedged scheduler). Logs in `logs/` (last 14 kept). The task runs
+on battery (the laptop is usually unplugged at 07:00). Each run writes a
+heartbeat: `logs/last_run.json` (result + freshness) and, on failure, a
+`logs/LAST_RUN_FAILED.txt` marker cleared on the next success — so a failed
+or green-but-stale run is visible without reading the log.
 
 ## Critical conventions — do not break these
 - **Routing split**: League-V4/Summoner-V4 use *platform* routing (kr, euw1, na1);
@@ -92,7 +97,13 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
   stage detail). Data layer is streamlit-free so it's testable. Verified
   rendering live against 16.12. `dashboard_data.connect()` reads the URL
   directly (config.py captures DATABASE_URL too early for `streamlit run`)
-- ❌ No tests beyond the smoke test; matchup matrices unbuilt
+- ✅ Pipeline hardening: scheduler runs on battery; daily heartbeat
+  (`logs/last_run.json` + `LAST_RUN_FAILED.txt` marker) + post-run freshness
+  guard; 30-test zero-dep `unittest` suite over the load-bearing pure logic
+  (`champ_key`, `warehouse_patch`/`patch_sort_key`, `composite_score`/
+  `wilson_lcb`/`pick_velocity`, `parse_soloqueue_ids`)
+- ❌ Matchup matrices unbuilt; backtest precision side + weight tuning pending
+  more accumulated patches
 
 ## Known tuning knobs (set crudely, tune via backtest)
 - `compute_stats.PRIOR_STRENGTH = 400` (shrinkage pseudo-games)

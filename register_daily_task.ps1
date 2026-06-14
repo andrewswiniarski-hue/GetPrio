@@ -12,7 +12,11 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$runner`"" `
     -WorkingDirectory $PSScriptRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At $At
+# AllowStartIfOnBatteries/DontStopIfGoingOnBatteries: this runs on a laptop
+# that is usually unplugged at 07:00 — the defaults would silently skip the
+# run until it next went on AC. StartWhenAvailable still catches missed runs.
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Hours 4) -MultipleInstances IgnoreNew
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
