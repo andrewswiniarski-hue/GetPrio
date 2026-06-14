@@ -28,6 +28,9 @@ python fetch_pro_rosters.py            # regenerate pro_accounts_seed.csv from L
 python load_pro_accounts.py pro_accounts_seed.csv   # resolve + load; rerun after regen or roster changes
 python fetch_pro_picks.py              # refresh pro-play ground truth (pro_picks) from Leaguepedia scoreboards
 python compute_stats.py [--patch 25.11]
+
+streamlit run dashboard.py             # coach dashboard over latest_emergence (reads .database_url if env unset)
+python backtest.py                     # replay as-of rankings vs pro_picks (recall + lead time, novel-only view)
 ```
 
 Scheduled ingest: `daily_run.ps1` runs the 4-step chain daily via Task
@@ -83,7 +86,13 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
   to make tuning meaningful
 - ⚠️ `config.PLATFORMS` temporarily kr-only; restore euw1/na1 once a production
   key replaces the dev key (dev key expires every 24h)
-- ❌ No tests beyond the smoke test; no scheduler; no dashboard
+- ✅ Coach dashboard v1 (`dashboard.py` + `dashboard_data.py`, Streamlit):
+  novel-only watchlist by role, glanceable cards (badges, WR+sample, pro names
+  inline, stage status), one-click Briefing (pick-rate curve, pro game log,
+  stage detail). Data layer is streamlit-free so it's testable. Verified
+  rendering live against 16.12. `dashboard_data.connect()` reads the URL
+  directly (config.py captures DATABASE_URL too early for `streamlit run`)
+- ❌ No tests beyond the smoke test; matchup matrices unbuilt
 
 ## Known tuning knobs (set crudely, tune via backtest)
 - `compute_stats.PRIOR_STRENGTH = 400` (shrinkage pseudo-games)
@@ -104,9 +113,13 @@ day, not a wedged scheduler). Logs in `logs/` (last 14 kept).
    patch has both a prior-patch soloq baseline and pro_picks. Remaining: a
    precision side (do flagged picks actually reach stage?), then weight
    tuning — both need a few more accumulated patches to be meaningful
-4. Matchup/synergy matrices (table `matchup_stats` already exists, unused)
-5. Streamlit dashboard over `latest_emergence`
-6. Scheduling (cron is fine; Airflow only if this grows)
+4. Matchup/synergy matrices (table `matchup_stats` already exists, unused);
+   best surfaced inside the dashboard's per-pick Briefing, champion-centric
+   (not a full matrix), shrunk hard with sample sizes shown
+5. ~~Streamlit dashboard over `latest_emergence`~~ v1 DONE (`dashboard.py`);
+   polish: per-pick matchup drill-down, "we flag N days early" credibility
+   banner once the backtest validates
+6. ~~Scheduling~~ done (`daily_run.ps1` via Task Scheduler)
 
 ## Working style for Claude Code sessions
 - One verifiable objective per session; run the pipeline to prove changes work

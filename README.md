@@ -80,6 +80,17 @@ Daily automation: `register_daily_task.ps1` registers `daily_run.ps1` in
 Windows Task Scheduler (ladder → matches → parse → stats, with logging and
 a loud failure if the API key has expired).
 
+Coach dashboard:
+
+```bash
+streamlit run dashboard.py    # novel-pick watchlist by role, per-pick briefing
+```
+
+A busy-coach view of `latest_emergence`: emerging picks ranked by score with
+the key evidence visible up front (novel/rising badges, win rate + sample,
+which pros are practicing it, stage status), and a one-click Briefing per pick
+(pick-rate trend, pro game log, stage detail).
+
 ## Design notes
 
 - **`matches_raw` is immutable.** New parsed fields are backfilled by

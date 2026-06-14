@@ -6,3 +6,4 @@ __pycache__/
 logs/
 .leaguepedia_creds
 data/
+.claude/launch.json
